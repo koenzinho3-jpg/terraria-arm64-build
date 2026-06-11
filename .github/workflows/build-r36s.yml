@@ -49,8 +49,9 @@ jobs:
               git clone --depth 1 --branch release-3.4.10 https://github.com/libsdl-org/SDL.git
               cd SDL
 
-              # Remove the validation that blocks us
-              sed -i "415d" cmake/macros.cmake
+              # Patch: Comment out the validation message() line
+              echo "--- Patching CMake validation ---"
+              sed -i "415s/^/#/" cmake/macros.cmake
 
               mkdir build && cd build
               cmake .. \
@@ -80,7 +81,8 @@ jobs:
               export LD_LIBRARY_PATH=/opt/sdl3/lib:$LD_LIBRARY_PATH
 
               git clone --recursive --depth 1 https://github.com/FNA-XNA/FNA3D.git
-              cd FNA3D/build 2>/dev/null || mkdir build && cd build
+              mkdir -p FNA3D/build
+              cd FNA3D/build
               
               cmake .. \
                 -G Ninja \
@@ -98,7 +100,8 @@ jobs:
               echo "========== FAudio =========="
               cd /tmp
               git clone --depth 1 https://github.com/FNA-XNA/FAudio.git
-              cd FAudio/build 2>/dev/null || mkdir build && cd build
+              mkdir -p FAudio/build
+              cd FAudio/build
 
               cmake .. \
                 -G Ninja \
