@@ -1,4 +1,22 @@
-- name: Build Libraries for R36S (ARM64, GLIBC 2.28-compatible)
+name: Build R36S Libraries - SDL3 KMSDRM + FNA3D + FAudio
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build Libraries for R36S (ARM64, GLIBC 2.28-compatible)
         run: |
           mkdir -p output logs
 
@@ -97,3 +115,17 @@
                 [ -f "$lib" ] && echo "$(basename $lib): $(strings "$lib" 2>/dev/null | grep GLIBC_ | sort -V | tail -1)"
               done
             ' 2>&1 | tee logs/build.log
+
+      - name: Upload Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r36s-libraries
+          path: output
+
+      - name: Upload Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: logs
