@@ -62,11 +62,16 @@ jobs:
                 https://github.com/libsdl-org/SDL.git
               
               cd SDL
+
+              # PATCH: Desabilitar validação de X11/Wayland
+              echo "--- Patching CMakeLists.txt ---"
+              sed -i "s/SDL could not find X11 or Wayland/# SDL could not find X11 or Wayland/" CMakeLists.txt
+              sed -i "415d" cmake/macros.cmake || true
+              
               mkdir build
               cd build
 
               echo "--- CMake Configuration ---"
-              # SDL3 vai reclamar de X11/Wayland, mas build.ninja vai ser gerado
               cmake .. \
                 -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
@@ -80,7 +85,7 @@ jobs:
                 -DSDL_OFFSCREEN=ON \
                 -DSDL_TESTS=OFF \
                 -DCMAKE_INSTALL_PREFIX=/opt/sdl3 \
-                > /workspace/logs/cmake-config.log 2>&1 || echo "CMake warning (ignorando X11/Wayland)"
+                > /workspace/logs/cmake-config.log 2>&1
 
               if [ ! -f build.ninja ]; then
                 echo "ERRO: build.ninja não foi gerado!"
