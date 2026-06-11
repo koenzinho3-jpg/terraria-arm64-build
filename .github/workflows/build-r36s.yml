@@ -37,6 +37,17 @@ jobs:
               uname -m
               uname -r
 
+              echo "=== Removing X11/Wayland libs ==="
+              apt-get remove -y \
+                libx11-dev \
+                libx11-6 \
+                libwayland-dev \
+                libwayland-client0 \
+                libxext-dev \
+                libxrandr-dev \
+                xwayland \
+                2>/dev/null || true
+
               echo "=== Installing Dependencies ==="
               apt-get install -y \
                 git \
