@@ -1,0 +1,151 @@
+name: Build R36S Libraries
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build SDL3 + FNA3D + FAudio
+        run: |
+          docker run --rm \
+            --platform linux/arm64 \
+            -v ${{ github.workspace }}:/workspace \
+            ubuntu:20.04 bash -c '
+
+            export DEBIAN_FRONTEND=noninteractive
+
+            apt-get update
+
+            apt-get install -y \
+              git \
+              build-essential \
+              cmake \
+              ninja-build \
+              pkg-config \
+              ca-certificates \
+              libdrm-dev \
+              libgbm-dev \
+              libegl1-mesa-dev \
+              libgles2-mesa-dev \
+              libasound2-dev \
+              libudev-dev
+
+            mkdir -p /workspace/output
+
+            #####################################
+            # SDL3
+            #####################################
+
+            cd /tmp
+
+            git clone --depth 1 \
+              https://github.com/libsdl-org/SDL.git
+
+            cd SDL
+
+            mkdir build
+            cd build
+
+            cmake .. \
+              -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DSDL_SHARED=ON \
+              -DSDL_STATIC=OFF \
+              -DSDL_X11=OFF \
+              -DSDL_WAYLAND=OFF \
+              -DSDL_KMSDRM=ON \
+              -DSDL_OPENGLES=ON \
+              -DSDL_OPENGL=OFF \
+              -DSDL_HIDAPI=OFF \
+              -DCMAKE_INSTALL_PREFIX=/opt/sdl3
+
+            ninja
+            ninja install
+
+            cp libSDL3.so* /workspace/output/
+
+            #####################################
+            # FNA3D
+            #####################################
+
+            export PKG_CONFIG_PATH=/opt/sdl3/lib/pkgconfig
+
+            cd /tmp
+
+            git clone --recursive \
+              https://github.com/FNA-XNA/FNA3D.git
+
+            cd FNA3D
+
+            mkdir build
+            cd build
+
+            cmake .. \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_PREFIX_PATH=/opt/sdl3
+
+            make -j2
+
+            cp libFNA3D.so \
+              /workspace/output/libFNA3D.so.0
+
+            #####################################
+            # FAudio
+            #####################################
+
+            cd /tmp
+
+            git clone \
+              https://github.com/FNA-XNA/FAudio.git
+
+            cd FAudio
+
+            mkdir build
+            cd build
+
+            cmake .. \
+              -DCMAKE_BUILD_TYPE=Release
+
+            make -j2
+
+            cp libFAudio.so \
+              /workspace/output/libFAudio.so.0
+
+            #####################################
+            # Diagnostics
+            #####################################
+
+            echo "===== SDL3 ====="
+            strings /workspace/output/libSDL3.so* \
+              | grep -i kmsdrm || true
+
+            echo "===== FNA3D ====="
+            strings /workspace/output/libFNA3D.so.0 \
+              | grep -iE "GLES|EGL|OpenGL|Vulkan|SDL_GPU" || true
+
+            echo "===== GLIBC ====="
+            for f in /workspace/output/*.so*; do
+              echo "FILE: $f"
+              strings "$f" | grep GLIBC_ | sort -Vu || true
+            done
+
+            ls -lah /workspace/output
+            '
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: r36s-libraries
+          path: output/
