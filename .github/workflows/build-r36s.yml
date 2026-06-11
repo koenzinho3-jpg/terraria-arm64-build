@@ -26,7 +26,7 @@ jobs:
             -v "${{ github.workspace }}:/workspace" \
             ubuntu:20.04 \
             bash -c '
-              set -x  # Debug: mostra cada comando
+              set -x
               
               export DEBIAN_FRONTEND=noninteractive
 
@@ -36,7 +36,6 @@ jobs:
               ldd --version | head -1
               uname -m
               uname -r
-              cat /etc/issue
 
               echo "=== Installing Dependencies ==="
               apt-get install -y \
@@ -57,7 +56,7 @@ jobs:
               mkdir -p /workspace/logs
 
               echo ""
-              echo "===== BUILD SDL3 WITH KMSDRM ====="
+              echo "===== BUILD SDL3 WITH KMSDRM (HEADLESS) ====="
               echo ""
 
               cd /tmp
@@ -69,9 +68,6 @@ jobs:
                 https://github.com/libsdl-org/SDL.git
               
               cd SDL
-              echo "SDL cloned at: $(pwd)"
-              ls -la
-              
               mkdir build
               cd build
 
@@ -83,8 +79,6 @@ jobs:
                 -DCMAKE_C_FLAGS="-march=armv8-a -O3" \
                 -DSDL_SHARED=ON \
                 -DSDL_STATIC=OFF \
-                -DSDL_X11=OFF \
-                -DSDL_WAYLAND=OFF \
                 -DSDL_KMSDRM=ON \
                 -DSDL_OPENGL=ON \
                 -DSDL_OPENGLES=ON \
@@ -92,12 +86,18 @@ jobs:
                 -DSDL_OFFSCREEN=ON \
                 -DSDL_HIDAPI=OFF \
                 -DSDL_TESTS=OFF \
+                -DSDL_X11=OFF \
+                -DSDL_WAYLAND=OFF \
+                -DSDL_VIDEO_DRIVER_X11=OFF \
+                -DSDL_VIDEO_DRIVER_WAYLAND=OFF \
+                -DSDL_VIDEO_DRIVER_KMSDRM=ON \
+                -DSDL_VIDEO_DRIVER_OFFSCREEN=ON \
+                -DSDL_WINDOWS=OFF \
                 -DCMAKE_INSTALL_PREFIX=/opt/sdl3
               
               if [ $? -ne 0 ]; then
                 echo "CMake FAILED!"
-                cp CMakeError.log /workspace/logs/ 2>/dev/null || true
-                cp CMakeOutput.log /workspace/logs/ 2>/dev/null || true
+                cat CMakeError.log >> /workspace/logs/cmake-error.log 2>/dev/null || true
                 exit 1
               fi
 
@@ -105,7 +105,7 @@ jobs:
               echo "✓ CMake OK"
               echo ""
               echo "--- Running Ninja Build ---"
-              ninja -v 2>&1 | tee /workspace/logs/sdl3-ninja-build.log
+              ninja -v 2>&1 | tee /workspace/logs/sdl3-build.log
               
               if [ $? -ne 0 ]; then
                 echo "Ninja BUILD FAILED!"
@@ -116,7 +116,7 @@ jobs:
               echo "✓ Build OK"
               echo ""
               echo "--- Running Ninja Install ---"
-              ninja install 2>&1 | tee /workspace/logs/sdl3-ninja-install.log
+              ninja install 2>&1 | tee /workspace/logs/sdl3-install.log
               
               if [ $? -ne 0 ]; then
                 echo "Ninja INSTALL FAILED!"
