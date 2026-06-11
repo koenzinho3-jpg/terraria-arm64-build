@@ -31,6 +31,11 @@ jobs:
               echo "=== SYSTEM INFO ==="
               uname -m
               
+              # Correção para os repositórios arquivados do Debian Buster
+              echo "deb http://archive.debian.org/debian buster main" > /etc/apt/sources.list
+              echo "deb http://archive.debian.org/debian-security buster/updates main" >> /etc/apt/sources.list
+              echo "Acquire::Check-Valid-Until \"false\";" > /etc/apt/apt.conf.d/99no-check-valid-until
+              
               # Instala dependências básicas (sem X11/Wayland para forçar KMSDRM puro)
               apt-get update && apt-get install -y \
                 git build-essential ninja-build pkg-config wget \
@@ -103,7 +108,7 @@ jobs:
               for lib in /workspace/output/lib*.so*; do
                 [ -f "$lib" ] && echo "$(basename $lib): $(strings "$lib" 2>/dev/null | grep GLIBC_ | sort -V | tail -1)"
               done
-            ' 2>&1 | tee /workspace/logs/build.log
+            ' 2>&1 | tee logs/build.log
 
       - name: Upload Artifacts
         if: always()
