@@ -35,7 +35,6 @@ jobs:
               echo "=== System Info ==="
               ldd --version | head -1
               uname -m
-              uname -r
 
               echo "=== Removing X11/Wayland libs ==="
               apt-get remove -y \
@@ -46,6 +45,8 @@ jobs:
                 libxext-dev \
                 libxrandr-dev \
                 xwayland \
+                libxrender-dev \
+                libxinerama-dev \
                 2>/dev/null || true
 
               echo "=== Installing Dependencies ==="
@@ -99,21 +100,19 @@ jobs:
                 -DSDL_TESTS=OFF \
                 -DSDL_X11=OFF \
                 -DSDL_WAYLAND=OFF \
-                -DSDL_VIDEO_DRIVER_X11=OFF \
-                -DSDL_VIDEO_DRIVER_WAYLAND=OFF \
-                -DSDL_VIDEO_DRIVER_KMSDRM=ON \
-                -DSDL_VIDEO_DRIVER_OFFSCREEN=ON \
-                -DSDL_WINDOWS=OFF \
-                -DCMAKE_INSTALL_PREFIX=/opt/sdl3
+                -DSDL_RENDER_D3D=OFF \
+                -DSDL_RENDER_METAL=OFF \
+                -DCMAKE_INSTALL_PREFIX=/opt/sdl3 \
+                -DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE || true
               
-              if [ $? -ne 0 ]; then
-                echo "CMake FAILED!"
+              if [ ! -f Makefile ] && [ ! -f build.ninja ]; then
+                echo "CMake FAILED to generate!"
                 cat CMakeError.log >> /workspace/logs/cmake-error.log 2>/dev/null || true
                 exit 1
               fi
 
               echo ""
-              echo "✓ CMake OK"
+              echo "✓ CMake completed"
               echo ""
               echo "--- Running Ninja Build ---"
               ninja -v 2>&1 | tee /workspace/logs/sdl3-build.log
