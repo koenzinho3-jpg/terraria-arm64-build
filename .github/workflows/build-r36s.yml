@@ -1,4 +1,4 @@
-name: Build R36S Libraries (SDL3 + FNA3D + FAudio)
+name: Build R36S Libraries (SDL3 + FNA3D + FAudio) - ARM64 GLIBC 2.31
 
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ jobs:
         with:
           platforms: arm64
 
-      - name: Build SDL3 + FNA3D + FAudio
+      - name: Build SDL3 + FNA3D + FAudio (ARM64, Ubuntu 20.04, GLIBC 2.31)
         run: |
           mkdir -p output
           mkdir -p logs
@@ -32,7 +32,13 @@ jobs:
 
               apt-get update -qq
 
-              echo "=== Installing Dependencies ==="
+              echo "=== System Info ==="
+              echo "Architecture: $(uname -m)"
+              ldd --version | head -1
+              strings /lib/aarch64-linux-gnu/libc.so.6 | grep "GLIBC_" | sort -V | tail -1
+
+              echo ""
+              echo "=== Installing Build Dependencies ==="
               apt-get install -y \
                 git \
                 build-essential \
@@ -45,13 +51,15 @@ jobs:
                 libegl1-mesa-dev \
                 libgles2-mesa-dev \
                 libasound2-dev \
-                libudev-dev
+                libudev-dev \
+                libx11-dev \
+                libwayland-dev
 
               mkdir -p /workspace/output
               mkdir -p /workspace/logs
 
               echo ""
-              echo "===== BUILD SDL3 WITH KMSDRM ====="
+              echo "===== BUILD SDL3 WITH KMSDRM + X11 + WAYLAND ====="
               echo ""
 
               cd /tmp
@@ -59,15 +67,9 @@ jobs:
               git clone \
                 --depth 1 \
                 --branch release-3.4.10 \
-                https://github.com/libsdl-org/SDL.git
+                https://github.com/libsdl-org/SDL.git 2>&1 | grep -v "detached HEAD" || true
               
               cd SDL
-
-              # PATCH: Desabilitar validação de X11/Wayland
-              echo "--- Patching CMakeLists.txt ---"
-              sed -i "s/SDL could not find X11 or Wayland/# SDL could not find X11 or Wayland/" CMakeLists.txt
-              sed -i "415d" cmake/macros.cmake || true
-              
               mkdir build
               cd build
 
@@ -76,28 +78,28 @@ jobs:
                 -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_C_FLAGS="-march=armv8-a -O3" \
+                -DCMAKE_CXX_FLAGS="-march=armv8-a -O3" \
                 -DSDL_SHARED=ON \
                 -DSDL_STATIC=OFF \
                 -DSDL_KMSDRM=ON \
+                -DSDL_X11=ON \
+                -DSDL_WAYLAND=ON \
                 -DSDL_OPENGL=ON \
                 -DSDL_OPENGLES=ON \
                 -DSDL_ALSA=ON \
                 -DSDL_OFFSCREEN=ON \
                 -DSDL_TESTS=OFF \
                 -DCMAKE_INSTALL_PREFIX=/opt/sdl3 \
-                > /workspace/logs/cmake-config.log 2>&1
+                2>&1 | tee /workspace/logs/cmake-config.log
 
-              if [ ! -f build.ninja ]; then
-                echo "ERRO: build.ninja não foi gerado!"
-                cat /workspace/logs/cmake-config.log
-                exit 1
-              fi
-
-              echo "✓ build.ninja gerado"
+              echo ""
+              echo "✓ CMake OK"
               echo ""
               echo "--- Ninja Build ---"
-              ninja 2>&1 | tee /workspace/logs/sdl3-build.log
+              ninja -j$(nproc) 2>&1 | tail -50 | tee /workspace/logs/sdl3-build.log
 
+              echo ""
+              echo "✓ Build OK"
               echo ""
               echo "--- Ninja Install ---"
               ninja install 2>&1 | tee /workspace/logs/sdl3-install.log
@@ -111,29 +113,32 @@ jobs:
               echo "===== BUILD FNA3D ====="
               echo ""
 
-              export PKG_CONFIG_PATH=/opt/sdl3/lib/pkgconfig
+              export PKG_CONFIG_PATH=/opt/sdl3/lib/pkgconfig:/opt/sdl3/lib64/pkgconfig
               export CMAKE_PREFIX_PATH=/opt/sdl3
-              export LD_LIBRARY_PATH=/opt/sdl3/lib:$LD_LIBRARY_PATH
+              export LD_LIBRARY_PATH=/opt/sdl3/lib:/opt/sdl3/lib64:$LD_LIBRARY_PATH
 
               cd /tmp
 
               git clone --recursive \
                 --depth 1 \
-                https://github.com/FNA-XNA/FNA3D.git
+                https://github.com/FNA-XNA/FNA3D.git 2>&1 | grep -v "detached HEAD" || true
 
               mkdir FNA3D/build
               cd FNA3D/build
 
+              echo "--- FNA3D CMake ---"
               cmake .. \
                 -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_PREFIX_PATH=/opt/sdl3 \
                 -DCMAKE_C_FLAGS="-march=armv8-a -O3" \
-                2>&1 | tee /workspace/logs/fna3d-cmake.log
+                2>&1 | tail -30 | tee /workspace/logs/fna3d-cmake.log
 
-              ninja 2>&1 | tee /workspace/logs/fna3d-build.log
+              echo "--- FNA3D Build ---"
+              ninja -j$(nproc) 2>&1 | tail -30 | tee /workspace/logs/fna3d-build.log
 
               find . -name "libFNA3D.so*" -exec cp {} /workspace/output/libFNA3D.so.0 \;
+              echo "FNA3D copied: $(ls -lh /workspace/output/libFNA3D.so.0 2>/dev/null || echo "NOT FOUND")"
 
               echo ""
               echo "===== BUILD FAudio ====="
@@ -143,35 +148,49 @@ jobs:
 
               git clone \
                 --depth 1 \
-                https://github.com/FNA-XNA/FAudio.git
+                https://github.com/FNA-XNA/FAudio.git 2>&1 | grep -v "detached HEAD" || true
 
               mkdir FAudio/build
               cd FAudio/build
 
+              echo "--- FAudio CMake ---"
               cmake .. \
                 -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_PREFIX_PATH=/opt/sdl3 \
                 -DCMAKE_C_FLAGS="-march=armv8-a -O3" \
-                2>&1 | tee /workspace/logs/faudio-cmake.log
+                2>&1 | tail -30 | tee /workspace/logs/faudio-cmake.log
 
-              ninja 2>&1 | tee /workspace/logs/faudio-build.log
+              echo "--- FAudio Build ---"
+              ninja -j$(nproc) 2>&1 | tail -30 | tee /workspace/logs/faudio-build.log
 
               find . -name "libFAudio.so*" -exec cp {} /workspace/output/libFAudio.so.0 \;
+              echo "FAudio copied: $(ls -lh /workspace/output/libFAudio.so.0 2>/dev/null || echo "NOT FOUND")"
 
               echo ""
               echo "===== FINAL OUTPUT ====="
               ls -lah /workspace/output
+              echo ""
+              echo "Arquivo count: $(find /workspace/output -type f | wc -l)"
 
               echo ""
-              echo "=== GLIBC Dependencies ==="
+              echo "=== GLIBC Dependencies (IMPORTANTE!) ==="
               for lib in /workspace/output/*.so*; do
                 if [ -f "$lib" ]; then
-                  echo "$(basename $lib):"
-                  strings "$lib" 2>/dev/null | grep "GLIBC_" | sort -V | uniq | tail -3
+                  echo ""
+                  echo "▶ $(basename $lib)"
+                  strings "$lib" 2>/dev/null | grep "GLIBC_" | sort -V | uniq | tail -5
                 fi
               done
             ' 2>&1 | tee /workspace/logs/build-output.log
+
+      - name: Verify Output
+        run: |
+          echo "=== Output Files ==="
+          ls -lah output/ 2>/dev/null || echo "ERROR: No output directory!"
+          echo ""
+          echo "=== Log Files ==="
+          ls -lah logs/
 
       - name: Upload Logs
         if: always()
@@ -184,5 +203,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r36s-libraries
+          name: r36s-libraries-arm64
           path: output
