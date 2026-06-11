@@ -1,151 +1,179 @@
 name: Build R36S Libraries
 
 on:
-  workflow_dispatch:
+workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+build:
+runs-on: ubuntu-latest
 
-    steps:
+steps:
+  - uses: actions/checkout@v4
 
-      - name: Checkout
-        uses: actions/checkout@v4
+  - name: Setup QEMU
+    uses: docker/setup-qemu-action@v3
+    with:
+      platforms: arm64
 
-      - name: Setup QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
+  - name: Build SDL3 + FNA3D + FAudio
+    run: |
+      mkdir -p output
+      mkdir -p logs
 
-      - name: Build SDL3 + FNA3D + FAudio
-        run: |
-          docker run --rm \
-            --platform linux/arm64 \
-            -v ${{ github.workspace }}:/workspace \
-            ubuntu:20.04 bash -c '
+      docker run --rm \
+        --platform linux/arm64 \
+        -v ${{ github.workspace }}:/workspace \
+        ubuntu:20.04 bash -c '
 
-            export DEBIAN_FRONTEND=noninteractive
+      export DEBIAN_FRONTEND=noninteractive
 
-            apt-get update
+      apt-get update
 
-            apt-get install -y \
-              git \
-              build-essential \
-              cmake \
-              ninja-build \
-              pkg-config \
-              ca-certificates \
-              libdrm-dev \
-              libgbm-dev \
-              libegl1-mesa-dev \
-              libgles2-mesa-dev \
-              libasound2-dev \
-              libudev-dev
+      apt-get install -y \
+        git \
+        build-essential \
+        cmake \
+        ninja-build \
+        pkg-config \
+        ca-certificates \
+        libdrm-dev \
+        libgbm-dev \
+        libegl1-mesa-dev \
+        libgles2-mesa-dev \
+        libasound2-dev \
+        libudev-dev
 
-            mkdir -p /workspace/output
+      mkdir -p /workspace/output
+      mkdir -p /workspace/logs
 
-            #####################################
-            # SDL3
-            #####################################
+      ########################################
+      # SDL3
+      ########################################
 
-            cd /tmp
+      echo "=== SDL3 ==="
 
-            git clone --depth 1 \
-              https://github.com/libsdl-org/SDL.git
+      cd /tmp
 
-            cd SDL
+      git clone https://github.com/libsdl-org/SDL.git
+      cd SDL
 
-            mkdir build
-            cd build
+      git checkout release-3.4.10
 
-            cmake .. \
-              -G Ninja \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DSDL_SHARED=ON \
-              -DSDL_STATIC=OFF \
-              -DSDL_X11=OFF \
-              -DSDL_WAYLAND=OFF \
-              -DSDL_KMSDRM=ON \
-              -DSDL_OPENGLES=ON \
-              -DSDL_OPENGL=OFF \
-              -DSDL_HIDAPI=OFF \
-              -DCMAKE_INSTALL_PREFIX=/opt/sdl3
+      mkdir build
+      cd build
 
-            ninja
-            ninja install
+      cmake .. \
+        -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DSDL_SHARED=ON \
+        -DSDL_STATIC=OFF \
+        -DSDL_X11=OFF \
+        -DSDL_WAYLAND=OFF \
+        -DSDL_KMSDRM=ON \
+        -DSDL_OFFSCREEN=ON \
+        -DSDL_OPENGLES=ON \
+        -DSDL_OPENGL=OFF \
+        -DSDL_HIDAPI=OFF \
+        -DSDL_UNIX_CONSOLE_BUILD=ON \
+        -DSDL_UNIX_CONSOLE_BUILD_REQUIRE_DRM=OFF \
+        -DSDL_CHECK_REQUIRED_INCLUDES=OFF \
+        -DCMAKE_INSTALL_PREFIX=/opt/sdl3 \
+        > /workspace/logs/sdl3-cmake.log 2>&1
 
-            cp libSDL3.so* /workspace/output/
+      ninja \
+        > /workspace/logs/sdl3-build.log 2>&1 || true
 
-            #####################################
-            # FNA3D
-            #####################################
+      ninja install \
+        >> /workspace/logs/sdl3-build.log 2>&1 || true
 
-            export PKG_CONFIG_PATH=/opt/sdl3/lib/pkgconfig
+      echo "=== SDL INSTALL TREE ===" \
+        > /workspace/logs/sdl3-install.log
 
-            cd /tmp
+      find /opt/sdl3 \
+        >> /workspace/logs/sdl3-install.log 2>&1 || true
 
-            git clone --recursive \
-              https://github.com/FNA-XNA/FNA3D.git
+      find /opt/sdl3 -name "libSDL3.so*" \
+        -exec cp {} /workspace/output/ \; || true
 
-            cd FNA3D
+      ########################################
+      # FNA3D
+      ########################################
 
-            mkdir build
-            cd build
+      echo "=== FNA3D ==="
 
-            cmake .. \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_PREFIX_PATH=/opt/sdl3
+      export PKG_CONFIG_PATH=/opt/sdl3/lib/pkgconfig
+      export CMAKE_PREFIX_PATH=/opt/sdl3
 
-            make -j2
+      cd /tmp
 
-            cp libFNA3D.so \
-              /workspace/output/libFNA3D.so.0
+      git clone --recursive https://github.com/FNA-XNA/FNA3D.git
 
-            #####################################
-            # FAudio
-            #####################################
+      cd FNA3D
+      mkdir build
+      cd build
 
-            cd /tmp
+      cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_PREFIX_PATH=/opt/sdl3 \
+        > /workspace/logs/fna3d-cmake.log 2>&1
 
-            git clone \
-              https://github.com/FNA-XNA/FAudio.git
+      make -j2 \
+        > /workspace/logs/fna3d-build.log 2>&1 || true
 
-            cd FAudio
+      find . -name "libFNA3D.so*" \
+        -exec cp {} /workspace/output/libFNA3D.so.0 \; || true
 
-            mkdir build
-            cd build
+      ########################################
+      # FAudio
+      ########################################
 
-            cmake .. \
-              -DCMAKE_BUILD_TYPE=Release
+      echo "=== FAudio ==="
 
-            make -j2
+      cd /tmp
 
-            cp libFAudio.so \
-              /workspace/output/libFAudio.so.0
+      git clone https://github.com/FNA-XNA/FAudio.git
 
-            #####################################
-            # Diagnostics
-            #####################################
+      cd FAudio
+      mkdir build
+      cd build
 
-            echo "===== SDL3 ====="
-            strings /workspace/output/libSDL3.so* \
-              | grep -i kmsdrm || true
+      cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_PREFIX_PATH=/opt/sdl3 \
+        > /workspace/logs/faudio-cmake.log 2>&1
 
-            echo "===== FNA3D ====="
-            strings /workspace/output/libFNA3D.so.0 \
-              | grep -iE "GLES|EGL|OpenGL|Vulkan|SDL_GPU" || true
+      make -j2 \
+        > /workspace/logs/faudio-build.log 2>&1 || true
 
-            echo "===== GLIBC ====="
-            for f in /workspace/output/*.so*; do
-              echo "FILE: $f"
-              strings "$f" | grep GLIBC_ | sort -Vu || true
-            done
+      find . -name "libFAudio.so*" \
+        -exec cp {} /workspace/output/libFAudio.so.0 \; || true
 
-            ls -lah /workspace/output
-            '
+      ########################################
+      # Diagnostics
+      ########################################
 
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: r36s-libraries
-          path: output/
+      echo "=== OUTPUT FILES ==="
+      ls -lah /workspace/output
+
+      echo "=== GLIBC CHECK ==="
+
+      for f in /workspace/output/*.so*; do
+        echo "FILE: $f"
+        strings "$f" | grep GLIBC_ | sort -Vu || true
+      done
+
+      '
+
+  - name: Upload Libraries
+    uses: actions/upload-artifact@v4
+    if: always()
+    with:
+      name: r36s-libraries
+      path: output/
+
+  - name: Upload Logs
+    uses: actions/upload-artifact@v4
+    if: always()
+    with:
+      name: build-logs
+      path: logs/
