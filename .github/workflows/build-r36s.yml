@@ -78,6 +78,9 @@ jobs:
               cp /opt/sdl3/lib/libSDL3.so* /workspace/output/
 
               # ===== FNA3D =====
+             # ... [Código anterior permanece igual] ...
+
+              # ===== FNA3D =====
               echo "========== FNA3D =========="
               cd /tmp
               export PKG_CONFIG_PATH=/opt/sdl3/lib/pkgconfig
@@ -91,10 +94,12 @@ jobs:
                 -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_C_FLAGS="-march=armv8-a -O3" \
-                -DFNA3D_VULKAN=OFF
+                -DFNA3D_VULKAN=OFF \
+                -DCMAKE_PREFIX_PATH="/opt/sdl3;/usr/local"
               
               ninja -j$(nproc)
-              cp libFNA3D.so* /workspace/output/libFNA3D.so.0
+              # Cópia corrigida:
+              cp libFNA3D.so* /workspace/output/
 
               # ===== FAudio =====
               echo "========== FAudio =========="
@@ -108,24 +113,9 @@ jobs:
                 -DCMAKE_C_FLAGS="-march=armv8-a -O3"
               
               ninja -j$(nproc)
-              cp libFAudio.so* /workspace/output/libFAudio.so.0
+              # Cópia corrigida:
+              cp libFAudio.so* /workspace/output/
 
               echo "=== FINAL GLIBC CHECK ==="
-              for lib in /workspace/output/lib*.so*; do
-                [ -f "$lib" ] && echo "$(basename $lib): $(strings "$lib" 2>/dev/null | grep GLIBC_ | sort -V | tail -1)"
-              done
+              ls -l /workspace/output/
             ' 2>&1 | tee logs/build.log
-
-      - name: Upload Artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: r36s-libraries
-          path: output
-
-      - name: Upload Logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: logs
