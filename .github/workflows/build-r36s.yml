@@ -1,4 +1,4 @@
-name: Build R36S Libraries (Debug)
+name: Build R36S Libraries (SDL3 + FNA3D + FAudio)
 
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ jobs:
         with:
           platforms: arm64
 
-      - name: Build SDL3 + FNA3D + FAudio (DEBUG MODE)
+      - name: Build SDL3 + FNA3D + FAudio
         run: |
           mkdir -p output
           mkdir -p logs
@@ -26,28 +26,11 @@ jobs:
             -v "${{ github.workspace }}:/workspace" \
             ubuntu:20.04 \
             bash -c '
-              set -x
+              set -e
               
               export DEBIAN_FRONTEND=noninteractive
 
               apt-get update -qq
-
-              echo "=== System Info ==="
-              ldd --version | head -1
-              uname -m
-
-              echo "=== Removing X11/Wayland libs ==="
-              apt-get remove -y \
-                libx11-dev \
-                libx11-6 \
-                libwayland-dev \
-                libwayland-client0 \
-                libxext-dev \
-                libxrandr-dev \
-                xwayland \
-                libxrender-dev \
-                libxinerama-dev \
-                2>/dev/null || true
 
               echo "=== Installing Dependencies ==="
               apt-get install -y \
@@ -68,12 +51,11 @@ jobs:
               mkdir -p /workspace/logs
 
               echo ""
-              echo "===== BUILD SDL3 WITH KMSDRM (HEADLESS) ====="
+              echo "===== BUILD SDL3 WITH KMSDRM ====="
               echo ""
 
               cd /tmp
               
-              echo "--- Cloning SDL3 ---"
               git clone \
                 --depth 1 \
                 --branch release-3.4.10 \
@@ -83,8 +65,8 @@ jobs:
               mkdir build
               cd build
 
-              echo ""
-              echo "--- Running CMake ---"
+              echo "--- CMake Configuration ---"
+              # SDL3 vai reclamar de X11/Wayland, mas build.ninja vai ser gerado
               cmake .. \
                 -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
@@ -94,67 +76,95 @@ jobs:
                 -DSDL_KMSDRM=ON \
                 -DSDL_OPENGL=ON \
                 -DSDL_OPENGLES=ON \
-                -DSDL_VULKAN=OFF \
+                -DSDL_ALSA=ON \
                 -DSDL_OFFSCREEN=ON \
-                -DSDL_HIDAPI=OFF \
                 -DSDL_TESTS=OFF \
-                -DSDL_X11=OFF \
-                -DSDL_WAYLAND=OFF \
-                -DSDL_RENDER_D3D=OFF \
-                -DSDL_RENDER_METAL=OFF \
                 -DCMAKE_INSTALL_PREFIX=/opt/sdl3 \
-                -DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE || true
-              
-              if [ ! -f Makefile ] && [ ! -f build.ninja ]; then
-                echo "CMake FAILED to generate!"
-                cat CMakeError.log >> /workspace/logs/cmake-error.log 2>/dev/null || true
+                > /workspace/logs/cmake-config.log 2>&1 || echo "CMake warning (ignorando X11/Wayland)"
+
+              if [ ! -f build.ninja ]; then
+                echo "ERRO: build.ninja não foi gerado!"
+                cat /workspace/logs/cmake-config.log
                 exit 1
               fi
 
+              echo "✓ build.ninja gerado"
               echo ""
-              echo "✓ CMake completed"
-              echo ""
-              echo "--- Running Ninja Build ---"
-              ninja -v 2>&1 | tee /workspace/logs/sdl3-build.log
-              
-              if [ $? -ne 0 ]; then
-                echo "Ninja BUILD FAILED!"
-                exit 1
-              fi
+              echo "--- Ninja Build ---"
+              ninja 2>&1 | tee /workspace/logs/sdl3-build.log
 
               echo ""
-              echo "✓ Build OK"
-              echo ""
-              echo "--- Running Ninja Install ---"
+              echo "--- Ninja Install ---"
               ninja install 2>&1 | tee /workspace/logs/sdl3-install.log
-              
-              if [ $? -ne 0 ]; then
-                echo "Ninja INSTALL FAILED!"
-                exit 1
-              fi
 
               echo ""
-              echo "✓ Install OK"
-              echo ""
-              echo "--- SDL3 Output ---"
-              find /opt/sdl3 -type f -name "*.so*"
-              
-              find /opt/sdl3 -name "libSDL3.so*" -o -name "libSDL3-3.0.so*" \
-                | while read f; do
-                  cp "$f" /workspace/output/
-                  ls -lh "$f"
-                done
+              echo "--- Copiando SDL3 .so ---"
+              find /opt/sdl3 -name "libSDL3.so*" -exec cp {} /workspace/output/ \;
+              ls -lah /workspace/output/
 
               echo ""
-              echo "===== BUILD COMPLETE ====="
-              echo "Output files:"
+              echo "===== BUILD FNA3D ====="
+              echo ""
+
+              export PKG_CONFIG_PATH=/opt/sdl3/lib/pkgconfig
+              export CMAKE_PREFIX_PATH=/opt/sdl3
+              export LD_LIBRARY_PATH=/opt/sdl3/lib:$LD_LIBRARY_PATH
+
+              cd /tmp
+
+              git clone --recursive \
+                --depth 1 \
+                https://github.com/FNA-XNA/FNA3D.git
+
+              mkdir FNA3D/build
+              cd FNA3D/build
+
+              cmake .. \
+                -G Ninja \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_PREFIX_PATH=/opt/sdl3 \
+                -DCMAKE_C_FLAGS="-march=armv8-a -O3" \
+                2>&1 | tee /workspace/logs/fna3d-cmake.log
+
+              ninja 2>&1 | tee /workspace/logs/fna3d-build.log
+
+              find . -name "libFNA3D.so*" -exec cp {} /workspace/output/libFNA3D.so.0 \;
+
+              echo ""
+              echo "===== BUILD FAudio ====="
+              echo ""
+
+              cd /tmp
+
+              git clone \
+                --depth 1 \
+                https://github.com/FNA-XNA/FAudio.git
+
+              mkdir FAudio/build
+              cd FAudio/build
+
+              cmake .. \
+                -G Ninja \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_PREFIX_PATH=/opt/sdl3 \
+                -DCMAKE_C_FLAGS="-march=armv8-a -O3" \
+                2>&1 | tee /workspace/logs/faudio-cmake.log
+
+              ninja 2>&1 | tee /workspace/logs/faudio-build.log
+
+              find . -name "libFAudio.so*" -exec cp {} /workspace/output/libFAudio.so.0 \;
+
+              echo ""
+              echo "===== FINAL OUTPUT ====="
               ls -lah /workspace/output
 
               echo ""
-              echo "GLIBC required:"
+              echo "=== GLIBC Dependencies ==="
               for lib in /workspace/output/*.so*; do
-                echo "  $(basename $lib):"
-                strings "$lib" 2>/dev/null | grep "GLIBC_" | sort -V | tail -1
+                if [ -f "$lib" ]; then
+                  echo "$(basename $lib):"
+                  strings "$lib" 2>/dev/null | grep "GLIBC_" | sort -V | uniq | tail -3
+                fi
               done
             ' 2>&1 | tee /workspace/logs/build-output.log
 
