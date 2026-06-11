@@ -16,64 +16,57 @@ jobs:
         with:
           platforms: arm64
 
-      - name: Build Libraries for R36S (ARM64, GLIBC 2.31-compatible)
+      - name: Build Libraries for R36S (ARM64, GLIBC 2.28-compatible)
         run: |
           mkdir -p output logs
 
           docker run --rm \
             --platform linux/arm64 \
             -v "${{ github.workspace }}:/workspace" \
-            ubuntu:20.04 \
+            debian:buster \
             bash -c '
               set -e
               export DEBIAN_FRONTEND=noninteractive
 
-              # System check
               echo "=== SYSTEM INFO ==="
               uname -m
-              ldd --version | head -1
-              echo "GLIBC max: $(strings /lib/aarch64-linux-gnu/libc.so.6 | grep GLIBC_ | sort -V | tail -1)"
-
-              # Install deps
+              
+              # Instala dependências básicas (sem X11/Wayland para forçar KMSDRM puro)
               apt-get update && apt-get install -y \
-                git build-essential cmake ninja-build pkg-config \
+                git build-essential ninja-build pkg-config wget \
                 libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev \
-                libasound2-dev libudev-dev libx11-dev libwayland-dev
+                libasound2-dev libudev-dev
 
-              mkdir -p /workspace/output /workspace/logs
+              # Instala CMake moderno (SDL3 exige 3.16+, Debian 10 nativo tem 3.13)
               cd /tmp
+              wget https://github.com/Kitware/CMake/releases/download/v3.28.3/cmake-3.28.3-linux-aarch64.sh
+              chmod +x cmake-3.28.3-linux-aarch64.sh
+              ./cmake-3.28.3-linux-aarch64.sh --skip-license --prefix=/usr/local
+              
+              mkdir -p /workspace/output /workspace/logs
 
               # ===== SDL3 =====
-              echo ""
               echo "========== SDL3 =========="
-              git clone --depth 1 --branch release-3.4.10 https://github.com/libsdl-org/SDL.git
+              git clone --depth 1 https://github.com/libsdl-org/SDL.git
               cd SDL
-
-              # Patch: Comment out the validation message() line
-              echo "--- Patching CMake validation ---"
-              sed -i "415s/^/#/" cmake/macros.cmake
-
               mkdir build && cd build
+              
               cmake .. \
                 -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_C_FLAGS="-march=armv8-a -O3" \
                 -DSDL_SHARED=ON -DSDL_STATIC=OFF \
-                -DSDL_KMSDRM=ON -DSDL_X11=ON -DSDL_WAYLAND=ON \
+                -DSDL_KMSDRM=ON -DSDL_X11=OFF -DSDL_WAYLAND=OFF \
                 -DSDL_OPENGL=ON -DSDL_OPENGLES=ON \
                 -DSDL_ALSA=ON -DSDL_OFFSCREEN=ON \
                 -DSDL_TESTS=OFF \
-                -DCMAKE_INSTALL_PREFIX=/opt/sdl3 \
-                2>&1 | tail -20
-
-              ninja -j$(nproc) 2>&1 | tail -20
-              ninja install 2>&1 | tail -10
-
-              find /opt/sdl3 -name "libSDL3*.so*" -type f -exec cp {} /workspace/output/ \;
-              echo "SDL3 done: $(ls /workspace/output/libSDL3* 2>/dev/null | wc -l) files"
+                -DCMAKE_INSTALL_PREFIX=/opt/sdl3
+              
+              ninja -j$(nproc)
+              ninja install
+              cp /opt/sdl3/lib/libSDL3.so* /workspace/output/
 
               # ===== FNA3D =====
-              echo ""
               echo "========== FNA3D =========="
               cd /tmp
               export PKG_CONFIG_PATH=/opt/sdl3/lib/pkgconfig
@@ -81,45 +74,32 @@ jobs:
               export LD_LIBRARY_PATH=/opt/sdl3/lib:$LD_LIBRARY_PATH
 
               git clone --recursive --depth 1 https://github.com/FNA-XNA/FNA3D.git
-              mkdir -p FNA3D/build
-              cd FNA3D/build
-              
+              cd FNA3D
+              mkdir build && cd build
               cmake .. \
                 -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
-                -DCMAKE_PREFIX_PATH=/opt/sdl3 \
                 -DCMAKE_C_FLAGS="-march=armv8-a -O3" \
-                2>&1 | tail -20
-
-              ninja -j$(nproc) 2>&1 | tail -20
-              find . -name "libFNA3D.so*" -type f -exec cp {} /workspace/output/libFNA3D.so.0 \;
-              echo "FNA3D done: $(ls /workspace/output/libFNA3D* 2>/dev/null | wc -l) files"
+                -DFNA3D_VULKAN=OFF
+              
+              ninja -j$(nproc)
+              cp libFNA3D.so* /workspace/output/libFNA3D.so.0
 
               # ===== FAudio =====
-              echo ""
               echo "========== FAudio =========="
               cd /tmp
               git clone --depth 1 https://github.com/FNA-XNA/FAudio.git
-              mkdir -p FAudio/build
-              cd FAudio/build
-
+              cd FAudio
+              mkdir build && cd build
               cmake .. \
                 -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
-                -DCMAKE_PREFIX_PATH=/opt/sdl3 \
-                -DCMAKE_C_FLAGS="-march=armv8-a -O3" \
-                2>&1 | tail -20
+                -DCMAKE_C_FLAGS="-march=armv8-a -O3"
+              
+              ninja -j$(nproc)
+              cp libFAudio.so* /workspace/output/libFAudio.so.0
 
-              ninja -j$(nproc) 2>&1 | tail -20
-              find . -name "libFAudio.so*" -type f -exec cp {} /workspace/output/libFAudio.so.0 \;
-              echo "FAudio done: $(ls /workspace/output/libFAudio* 2>/dev/null | wc -l) files"
-
-              # ===== FINAL =====
-              echo ""
-              echo "========== RESULTADO =========="
-              ls -lah /workspace/output/
-              echo ""
-              echo "=== GLIBC Requirements ==="
+              echo "=== FINAL GLIBC CHECK ==="
               for lib in /workspace/output/lib*.so*; do
                 [ -f "$lib" ] && echo "$(basename $lib): $(strings "$lib" 2>/dev/null | grep GLIBC_ | sort -V | tail -1)"
               done
