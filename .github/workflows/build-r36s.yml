@@ -1,4 +1,4 @@
-name: Build R36S Libraries (GLIBC 2.30 + KMSDRM)
+name: Build R36S Libraries (Debug)
 
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ jobs:
         with:
           platforms: arm64
 
-      - name: Build SDL3 + FNA3D + FAudio (ARM64, GLIBC 2.30, KMSDRM)
+      - name: Build SDL3 + FNA3D + FAudio (DEBUG MODE)
         run: |
           mkdir -p output
           mkdir -p logs
@@ -26,17 +26,19 @@ jobs:
             -v "${{ github.workspace }}:/workspace" \
             ubuntu:20.04 \
             bash -c '
-              set -e
-
+              set -x  # Debug: mostra cada comando
+              
               export DEBIAN_FRONTEND=noninteractive
 
-              apt-get update
+              apt-get update -qq
 
-              # Ubuntu 20.04 vem com GLIBC 2.31, close enough to 2.30
-              echo "=== Verificando GLIBC ==="
+              echo "=== System Info ==="
               ldd --version | head -1
-              strings /lib/aarch64-linux-gnu/libc.so.6 | grep "GLIBC_" | sort -V | tail -1
+              uname -m
+              uname -r
+              cat /etc/issue
 
+              echo "=== Installing Dependencies ==="
               apt-get install -y \
                 git \
                 build-essential \
@@ -49,27 +51,32 @@ jobs:
                 libegl1-mesa-dev \
                 libgles2-mesa-dev \
                 libasound2-dev \
-                libudev-dev \
-                xwayland \
-                libx11-dev \
-                libxext-dev \
-                libxrandr-dev
+                libudev-dev
 
               mkdir -p /workspace/output
               mkdir -p /workspace/logs
 
+              echo ""
               echo "===== BUILD SDL3 WITH KMSDRM ====="
+              echo ""
 
               cd /tmp
-
+              
+              echo "--- Cloning SDL3 ---"
               git clone \
                 --depth 1 \
                 --branch release-3.4.10 \
                 https://github.com/libsdl-org/SDL.git
+              
+              cd SDL
+              echo "SDL cloned at: $(pwd)"
+              ls -la
+              
+              mkdir build
+              cd build
 
-              mkdir SDL/build
-              cd SDL/build
-
+              echo ""
+              echo "--- Running CMake ---"
               cmake .. \
                 -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
@@ -85,100 +92,61 @@ jobs:
                 -DSDL_OFFSCREEN=ON \
                 -DSDL_HIDAPI=OFF \
                 -DSDL_TESTS=OFF \
-                -DCMAKE_INSTALL_PREFIX=/opt/sdl3 \
-                > /workspace/logs/sdl3-cmake.log 2>&1
+                -DCMAKE_INSTALL_PREFIX=/opt/sdl3
+              
+              if [ $? -ne 0 ]; then
+                echo "CMake FAILED!"
+                cp CMakeError.log /workspace/logs/ 2>/dev/null || true
+                cp CMakeOutput.log /workspace/logs/ 2>/dev/null || true
+                exit 1
+              fi
 
-              ninja > /workspace/logs/sdl3-build.log 2>&1
-              ninja install >> /workspace/logs/sdl3-build.log 2>&1
+              echo ""
+              echo "✓ CMake OK"
+              echo ""
+              echo "--- Running Ninja Build ---"
+              ninja -v 2>&1 | tee /workspace/logs/sdl3-ninja-build.log
+              
+              if [ $? -ne 0 ]; then
+                echo "Ninja BUILD FAILED!"
+                exit 1
+              fi
 
-              echo "--- SDL3 Install Tree ---"
-              find /opt/sdl3 > /workspace/logs/sdl3-install.log
+              echo ""
+              echo "✓ Build OK"
+              echo ""
+              echo "--- Running Ninja Install ---"
+              ninja install 2>&1 | tee /workspace/logs/sdl3-ninja-install.log
+              
+              if [ $? -ne 0 ]; then
+                echo "Ninja INSTALL FAILED!"
+                exit 1
+              fi
 
-              echo "--- SDL3 .so files ---"
-              find /opt/sdl3 -name "*.so*" | tee /workspace/logs/sdl3-sofiles.log
-
-              # Copia todos os .so do SDL3
+              echo ""
+              echo "✓ Install OK"
+              echo ""
+              echo "--- SDL3 Output ---"
+              find /opt/sdl3 -type f -name "*.so*"
+              
               find /opt/sdl3 -name "libSDL3.so*" -o -name "libSDL3-3.0.so*" \
                 | while read f; do
                   cp "$f" /workspace/output/
                   ls -lh "$f"
                 done
 
-              echo "===== BUILD FNA3D ====="
-
-              export PKG_CONFIG_PATH=/opt/sdl3/lib/pkgconfig
-              export CMAKE_PREFIX_PATH=/opt/sdl3
-              export LD_LIBRARY_PATH=/opt/sdl3/lib:$LD_LIBRARY_PATH
-
-              cd /tmp
-
-              git clone --recursive \
-                --depth 1 \
-                https://github.com/FNA-XNA/FNA3D.git
-
-              mkdir FNA3D/build
-              cd FNA3D/build
-
-              cmake .. \
-                -G Ninja \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DCMAKE_PREFIX_PATH=/opt/sdl3 \
-                -DCMAKE_C_FLAGS="-march=armv8-a -O3" \
-                > /workspace/logs/fna3d-cmake.log 2>&1
-
-              ninja > /workspace/logs/fna3d-build.log 2>&1
-
-              echo "--- FNA3D .so files ---"
-              find . -name "*.so*" | tee /workspace/logs/fna3d-sofiles.log
-
-              find . -name "libFNA3D.so*" \
-                -exec cp {} /workspace/output/libFNA3D.so.0 \;
-
-              echo "===== BUILD FAudio ====="
-
-              cd /tmp
-
-              git clone \
-                --depth 1 \
-                https://github.com/FNA-XNA/FAudio.git
-
-              mkdir FAudio/build
-              cd FAudio/build
-
-              cmake .. \
-                -G Ninja \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DCMAKE_PREFIX_PATH=/opt/sdl3 \
-                -DCMAKE_C_FLAGS="-march=armv8-a -O3" \
-                > /workspace/logs/faudio-cmake.log 2>&1
-
-              ninja > /workspace/logs/faudio-build.log 2>&1
-
-              echo "--- FAudio .so files ---"
-              find . -name "*.so*" | tee /workspace/logs/faudio-sofiles.log
-
-              find . -name "libFAudio.so*" \
-                -exec cp {} /workspace/output/libFAudio.so.0 \;
-
-              echo "===== VERIFY OUTPUT ====="
+              echo ""
+              echo "===== BUILD COMPLETE ====="
+              echo "Output files:"
               ls -lah /workspace/output
 
-              echo "===== CHECK GLIBC DEPS ====="
+              echo ""
+              echo "GLIBC required:"
               for lib in /workspace/output/*.so*; do
-                echo "--- $(basename $lib) ---"
-                strings "$lib" | grep "GLIBC_" | sort -V | tail -3
+                echo "  $(basename $lib):"
+                strings "$lib" 2>/dev/null | grep "GLIBC_" | sort -V | tail -1
               done
-
-              echo "===== CHECK SYMBOLS ====="
-              objdump -T /workspace/output/libSDL3.so* 2>/dev/null | grep "SDL_" | head -10
-            '
-
-      - name: Upload Libraries
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: r36s-libraries
-          path: output
+            ' 2>&1 | tee /workspace/logs/build-output.log
 
       - name: Upload Logs
         if: always()
@@ -186,3 +154,10 @@ jobs:
         with:
           name: build-logs
           path: logs
+
+      - name: Upload Libraries
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r36s-libraries
+          path: output
