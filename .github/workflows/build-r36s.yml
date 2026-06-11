@@ -19,7 +19,6 @@ jobs:
       - name: Build Libraries for R36S (ARM64, GLIBC 2.28-compatible)
         run: |
           mkdir -p output logs
-
           docker run --rm \
             --platform linux/arm64 \
             -v "${{ github.workspace }}:/workspace" \
@@ -27,7 +26,44 @@ jobs:
             bash -c '
               set -e
               export DEBIAN_FRONTEND=noninteractive
+              
+              # Configuração básica
+              echo "deb http://archive.debian.org/debian buster main" > /etc/apt/sources.list
+              echo "deb http://archive.debian.org/debian-security buster/updates main" >> /etc/apt/sources.list
+              echo "Acquire::Check-Valid-Until \"false\";" > /etc/apt/apt.conf.d/99no-check-valid-until
+              apt-get update && apt-get install -y git build-essential ninja-build pkg-config wget libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev libasound2-dev libudev-dev
 
+              # Instala CMake
+              wget -q https://github.com/Kitware/CMake/releases/download/v3.28.3/cmake-3.28.3-linux-aarch64.sh
+              chmod +x cmake-3.28.3-linux-aarch64.sh
+              ./cmake-3.28.3-linux-aarch64.sh --skip-license --prefix=/usr/local
+              
+              # SDL3
+              git clone --depth 1 https://github.com/libsdl-org/SDL.git /tmp/SDL
+              sed -i "s/message(FATAL_ERROR \"SDL could not find X11/message(WARNING \"SDL could not find X11/g" /tmp/SDL/cmake/macros.cmake
+              mkdir -p /tmp/SDL/build && cd /tmp/SDL/build
+              cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-march=armv8-a -O3" -DSDL_KMSDRM=ON -DSDL_X11=OFF -DSDL_WAYLAND=OFF -DSDL_UNIX_CONSOLE_BUILD=ON -DCMAKE_INSTALL_PREFIX=/opt/sdl3
+              ninja install
+              
+              # FAudio
+              git clone --depth 1 https://github.com/FNA-XNA/FAudio.git /tmp/FAudio
+              mkdir -p /tmp/FAudio/build && cd /tmp/FAudio/build
+              cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-march=armv8-a -O3" -DCMAKE_PREFIX_PATH=/opt/sdl3
+              ninja install
+              
+              # FNA3D
+              git clone --recursive --depth 1 https://github.com/FNA-XNA/FNA3D.git /tmp/FNA3D
+              mkdir -p /tmp/FNA3D/build && cd /tmp/FNA3D/build
+              export PKG_CONFIG_PATH=/opt/sdl3/lib/pkgconfig
+              cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-march=armv8-a -O3" -DFNA3D_VULKAN=OFF -DCMAKE_PREFIX_PATH="/opt/sdl3;/usr/local"
+              ninja
+              
+              # COPIA SEGURA: Garante que os arquivos sejam movidos para a pasta /workspace/output
+              cp -v /opt/sdl3/lib/libSDL3.so.0* /workspace/output/
+              cp -v /usr/local/lib/libFAudio.so.0* /workspace/output/ || cp -v /tmp/FAudio/build/libFAudio.so.0* /workspace/output/
+              cp -v /tmp/FNA3D/build/libFNA3D.so.0* /workspace/output/
+            ' 2>&1 | tee logs/build.log
+            
               echo "=== SYSTEM INFO ==="
               uname -m
               
