@@ -1,22 +1,4 @@
-name: Build R36S Libraries - SDL3 KMSDRM + FNA3D + FAudio
-
-on:
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
-      - name: Build Libraries for R36S (ARM64, GLIBC 2.28-compatible)
+- name: Build Libraries for R36S (ARM64, GLIBC 2.28-compatible)
         run: |
           mkdir -p output logs
 
@@ -36,13 +18,13 @@ jobs:
               echo "deb http://archive.debian.org/debian-security buster/updates main" >> /etc/apt/sources.list
               echo "Acquire::Check-Valid-Until \"false\";" > /etc/apt/apt.conf.d/99no-check-valid-until
               
-              # Instala dependências básicas (sem X11/Wayland para forçar KMSDRM puro)
+              # Instala dependências básicas
               apt-get update && apt-get install -y \
                 git build-essential ninja-build pkg-config wget \
                 libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev \
                 libasound2-dev libudev-dev
 
-              # Instala CMake moderno (SDL3 exige 3.16+, Debian 10 nativo tem 3.13)
+              # Instala CMake moderno
               cd /tmp
               wget https://github.com/Kitware/CMake/releases/download/v3.28.3/cmake-3.28.3-linux-aarch64.sh
               chmod +x cmake-3.28.3-linux-aarch64.sh
@@ -52,8 +34,13 @@ jobs:
 
               # ===== SDL3 =====
               echo "========== SDL3 =========="
+              cd /tmp
               git clone --depth 1 https://github.com/libsdl-org/SDL.git
               cd SDL
+              
+              # PATCH: Transforma o erro fatal de falta de X11/Wayland em apenas um aviso
+              sed -i "s/message(FATAL_ERROR \"SDL could not find X11/message(WARNING \"SDL could not find X11/g" cmake/macros.cmake || true
+              
               mkdir build && cd build
               
               cmake .. \
@@ -64,6 +51,7 @@ jobs:
                 -DSDL_KMSDRM=ON -DSDL_X11=OFF -DSDL_WAYLAND=OFF \
                 -DSDL_OPENGL=ON -DSDL_OPENGLES=ON \
                 -DSDL_ALSA=ON -DSDL_OFFSCREEN=ON \
+                -DSDL_UNIX_CONSOLE_BUILD=ON \
                 -DSDL_TESTS=OFF \
                 -DCMAKE_INSTALL_PREFIX=/opt/sdl3
               
@@ -109,17 +97,3 @@ jobs:
                 [ -f "$lib" ] && echo "$(basename $lib): $(strings "$lib" 2>/dev/null | grep GLIBC_ | sort -V | tail -1)"
               done
             ' 2>&1 | tee logs/build.log
-
-      - name: Upload Artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: r36s-libraries
-          path: output
-
-      - name: Upload Logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: logs
